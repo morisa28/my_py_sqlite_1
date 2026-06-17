@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Callable
 
-from services.book_service import add_book, delete_book, get_all_books_overview, search_books, update_book
+from services.book_service import (
+    add_book,
+    delete_book,
+    export_books_to_markdown,
+    get_all_books_overview,
+    import_books_from_markdown,
+    search_books,
+    update_book,
+)
 from services.user_service import get_user_borrow_status
 from ui.table_utils import ColumnSpec, heading_text, initial_sort_key, sort_rows
 
@@ -114,6 +122,8 @@ class AdminWindow:
         ttk.Button(sidebar, text="查询图书", command=self.query_books).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="查询用户借阅状态", command=self.query_user_status).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="总览图书信息", command=self.show_overview).pack(fill=tk.X, pady=4)
+        ttk.Button(sidebar, text="导出图书清单", command=self.export_book_list).pack(fill=tk.X, pady=4)
+        ttk.Button(sidebar, text="导入图书清单", command=self.import_book_list).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="退出登录", command=self.logout).pack(fill=tk.X, pady=(24, 4))
 
         content = ttk.Frame(root)
@@ -295,6 +305,37 @@ class AdminWindow:
 
     def show_overview(self) -> None:
         self.show_all_books()
+
+    def export_book_list(self) -> None:
+        file_path = filedialog.asksaveasfilename(
+            parent=self.window,
+            title="导出图书清单",
+            defaultextension=".md",
+            filetypes=[("Markdown 文件", "*.md")],
+        )
+        if not file_path:
+            return
+        ok, message = export_books_to_markdown(file_path)
+        self._show_operation_result(ok, message)
+
+    def import_book_list(self) -> None:
+        file_path = filedialog.askopenfilename(
+            parent=self.window,
+            title="导入图书清单",
+            filetypes=[("Markdown 文件", "*.md")],
+        )
+        if not file_path:
+            return
+        confirmed = messagebox.askyesno(
+            "导入图书清单",
+            "导入后将覆盖当前全部图书信息，并清空现有借阅记录。确定继续吗？",
+        )
+        if not confirmed:
+            return
+        ok, message = import_books_from_markdown(file_path)
+        self._show_operation_result(ok, message)
+        if ok:
+            self.show_all_books()
 
     def _show_operation_result(self, ok: bool, message: str) -> None:
         if ok:
