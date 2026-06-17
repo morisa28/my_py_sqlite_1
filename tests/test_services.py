@@ -19,7 +19,7 @@ from services.book_service import (
     update_book,
 )
 from services.borrow_service import borrow_book, get_user_current_borrows, return_book
-from services.user_service import get_user_borrow_status
+from services.user_service import get_all_users, get_user_borrow_records, get_user_borrow_status
 from ui.table_utils import sort_rows
 
 
@@ -116,6 +116,31 @@ class LibraryServiceTests(unittest.TestCase):
         self.assertGreaterEqual(len(rows), 1)
         self.assertEqual(rows[0]["username"], "user01")
         self.assertEqual(rows[0]["book_no"], "B001")
+
+    def test_get_all_users_excludes_passwords(self) -> None:
+        users = get_all_users(self.db_path)
+        self.assertEqual(len(users), 11)
+        self.assertTrue(any(user["username"] == "admin" for user in users))
+        self.assertTrue(any(user["username"] == "user01" for user in users))
+        self.assertTrue(all("password" not in user for user in users))
+
+        user01 = next(user for user in users if user["username"] == "user01")
+        self.assertEqual(user01["role_name"], "普通用户")
+        self.assertEqual(user01["current_borrows"], 0)
+
+    def test_get_user_borrow_records_by_user_row(self) -> None:
+        user = login("user01", "123456", self.db_path)
+        self.assertTrue(borrow_book(user["id"], "B001", self.db_path)[0])
+
+        rows = get_user_borrow_records(user["id"], self.db_path)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["username"], "user01")
+        self.assertEqual(rows[0]["book_no"], "B001")
+
+        admin = login("admin", "admin123", self.db_path)
+        admin_rows = get_user_borrow_records(admin["id"], self.db_path)
+        self.assertEqual(len(admin_rows), 1)
+        self.assertEqual(admin_rows[0]["status"], "无借阅记录")
 
     def test_overview_and_search(self) -> None:
         overview = get_all_books_overview(self.db_path)

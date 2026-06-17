@@ -15,7 +15,7 @@ from services.book_service import (
     search_books,
     update_book,
 )
-from services.user_service import get_user_borrow_status
+from services.user_service import get_all_users, get_user_borrow_records, get_user_borrow_status
 from ui.table_utils import ColumnSpec, heading_text, initial_sort_key, sort_rows
 
 
@@ -44,6 +44,16 @@ USER_BORROW_COLUMNS = [
     ("status", "借阅状态", 90),
     ("is_overdue", "是否超期", 80),
     ("overdue_days", "超期天数", 80),
+]
+
+USER_COLUMNS = [
+    ("user_id", "用户ID", 70),
+    ("username", "用户账号", 120),
+    ("name", "用户姓名", 120),
+    ("role_name", "角色", 90),
+    ("status", "状态", 90),
+    ("current_borrows", "当前借阅数", 100),
+    ("history_records", "历史借阅数", 100),
 ]
 
 
@@ -120,6 +130,7 @@ class AdminWindow:
         ttk.Button(sidebar, text="删除图书", command=self.delete_book_dialog).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="修改图书信息", command=self.update_book_dialog).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="查询图书", command=self.query_books).pack(fill=tk.X, pady=4)
+        ttk.Button(sidebar, text="查看所有用户", command=self.show_all_users).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="查询用户借阅状态", command=self.query_user_status).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="总览图书信息", command=self.show_overview).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="导出图书清单", command=self.export_book_list).pack(fill=tk.X, pady=4)
@@ -199,10 +210,24 @@ class AdminWindow:
         self.tree.selection_set(item_id)
         self.tree.focus(item_id)
         row = self.row_by_item.get(item_id)
-        if row is None or self.current_table_kind != "books":
+        if row is None:
             return
 
         menu = tk.Menu(self.window, tearoff=False)
+        if self.current_table_kind == "users":
+            menu.add_command(
+                label="查看借阅记录",
+                command=lambda selected=row: self.show_user_borrow_records(selected),
+            )
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+            return
+
+        if self.current_table_kind != "books":
+            return
+
         menu.add_command(
             label="修改图书信息",
             command=lambda book_no=row["book_no"]: self.update_book_dialog(book_no),
@@ -297,6 +322,17 @@ class AdminWindow:
         self.status_var.set(f"查询到 {len(rows)} 条用户借阅记录")
         if not rows:
             messagebox.showinfo("查询结果", "未查询到相关用户")
+
+    def show_all_users(self) -> None:
+        rows = get_all_users()
+        self._show_table(USER_COLUMNS, rows, "users")
+        self.status_var.set(f"当前共有 {len(rows)} 个用户")
+
+    def show_user_borrow_records(self, user_row: dict) -> None:
+        user_id = int(user_row["user_id"])
+        rows = get_user_borrow_records(user_id)
+        self._show_table(USER_BORROW_COLUMNS, rows, "user_borrows")
+        self.status_var.set(f"正在查看 {user_row['username']} 的借阅记录，共 {len(rows)} 条")
 
     def show_all_books(self) -> None:
         rows = get_all_books_overview()
