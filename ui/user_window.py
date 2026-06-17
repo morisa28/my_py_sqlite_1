@@ -1,0 +1,1 @@
+"""Normal user main window."""
