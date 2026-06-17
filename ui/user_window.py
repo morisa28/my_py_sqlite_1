@@ -8,6 +8,7 @@ from typing import Callable
 
 from services.book_service import search_books
 from services.borrow_service import borrow_book, get_user_current_borrows, return_book
+from ui.table_utils import ColumnSpec, heading_text, initial_sort_key, sort_rows
 
 
 BOOK_COLUMNS = [
@@ -49,6 +50,12 @@ class UserWindow:
         self.status_var = tk.StringVar(value=f"当前用户：{user['name']}（{user['username']}）")
         self.table_frame: ttk.Frame | None = None
         self.tree: ttk.Treeview | None = None
+        self.current_columns: list[ColumnSpec] = []
+        self.current_rows: list[dict] = []
+        self.current_table_kind = ""
+        self.current_sort_key = ""
+        self.current_sort_descending = False
+        self.row_by_item: dict[str, dict] = {}
         self._build()
 
     def _build(self) -> None:
@@ -66,6 +73,7 @@ class UserWindow:
         sidebar.grid(row=0, column=0, sticky=tk.NS, padx=(0, 12))
 
         ttk.Label(sidebar, text="普通用户", font=("Microsoft YaHei", 14, "bold")).pack(fill=tk.X, pady=(0, 12))
+        ttk.Button(sidebar, text="查看全部", command=self.show_all_books).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="查询图书", command=self.query_books).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="借书", command=self.borrow).pack(fill=tk.X, pady=4)
         ttk.Button(sidebar, text="还书", command=self.return_selected_book).pack(fill=tk.X, pady=4)
@@ -83,14 +91,22 @@ class UserWindow:
         status = ttk.Label(content, textvariable=self.status_var, anchor=tk.W)
         status.grid(row=1, column=0, sticky=tk.EW, pady=(8, 0))
 
-        self.query_books(default=True)
+        self.show_all_books(initial=True)
 
-    def _show_table(self, columns: list[tuple[str, str, int]], rows: list[dict]) -> None:
+    def _show_table(self, columns: list[ColumnSpec], rows: list[dict], table_kind: str) -> None:
+        self.current_columns = columns
+        self.current_rows = list(rows)
+        self.current_table_kind = table_kind
+        self.current_sort_key = initial_sort_key(columns)
+        self.current_sort_descending = False
+        self._render_table()
+
+    def _render_table(self) -> None:
         assert self.table_frame is not None
         for child in self.table_frame.winfo_children():
             child.destroy()
 
-        keys = [column[0] for column in columns]
+        keys = [column[0] for column in self.current_columns]
         tree = ttk.Treeview(self.table_frame, columns=keys, show="headings")
         vertical = ttk.Scrollbar(self.table_frame, orient=tk.VERTICAL, command=tree.yview)
         horizontal = ttk.Scrollbar(self.table_frame, orient=tk.HORIZONTAL, command=tree.xview)
@@ -102,28 +118,86 @@ class UserWindow:
         self.table_frame.rowconfigure(0, weight=1)
         self.table_frame.columnconfigure(0, weight=1)
 
-        for key, title, width in columns:
-            tree.heading(key, text=title)
+        for key, title, width in self.current_columns:
+            tree.heading(
+                key,
+                text=heading_text(title, key, self.current_sort_key, self.current_sort_descending),
+                command=lambda column_key=key: self._sort_by(column_key),
+            )
             tree.column(key, width=width, minwidth=60, anchor=tk.CENTER)
 
-        for row in rows:
+        self.row_by_item = {}
+        for row in sort_rows(self.current_rows, self.current_sort_key, self.current_sort_descending):
             values = [row.get(key, "") for key in keys]
-            tree.insert("", tk.END, values=values)
+            item_id = tree.insert("", tk.END, values=values)
+            self.row_by_item[item_id] = row
 
+        tree.bind("<Button-3>", self._handle_right_click)
+        tree.bind("<Button-2>", self._handle_right_click)
         self.tree = tree
+
+    def _sort_by(self, column_key: str) -> None:
+        if column_key == self.current_sort_key:
+            self.current_sort_descending = not self.current_sort_descending
+        else:
+            self.current_sort_key = column_key
+            self.current_sort_descending = False
+        self._render_table()
+
+    def _handle_right_click(self, event: tk.Event) -> None:
+        if self.tree is None:
+            return
+        item_id = self.tree.identify_row(event.y)
+        if not item_id:
+            return
+        self.tree.selection_set(item_id)
+        self.tree.focus(item_id)
+        row = self.row_by_item.get(item_id)
+        if row is None:
+            return
+
+        menu = tk.Menu(self.window, tearoff=False)
+        if self.current_table_kind == "books":
+            available = int(row.get("available_copies") or 0)
+            state = tk.NORMAL if available > 0 else tk.DISABLED
+            menu.add_command(
+                label="借阅此书",
+                state=state,
+                command=lambda book_no=row["book_no"]: self.borrow(book_no),
+            )
+        elif self.current_table_kind == "borrows":
+            menu.add_command(
+                label="归还此书",
+                command=lambda record_id=row["record_id"]: self.return_selected_book(record_id),
+            )
+        else:
+            return
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def show_all_books(self, initial: bool = False) -> None:
+        rows = search_books("")
+        self._show_table(BOOK_COLUMNS, rows, "books")
+        self.status_var.set(f"当前显示全部图书，共 {len(rows)} 条")
+        if not rows and not initial:
+            messagebox.showinfo("查看全部", "当前没有可显示的图书")
 
     def query_books(self, default: bool = False) -> None:
         keyword = "" if default else simpledialog.askstring("查询图书", "请输入图书编号或书名关键字：", parent=self.window)
         if keyword is None:
             return
         rows = search_books(keyword)
-        self._show_table(BOOK_COLUMNS, rows)
+        self._show_table(BOOK_COLUMNS, rows, "books")
         self.status_var.set(f"查询到 {len(rows)} 条图书记录")
         if not rows and not default:
             messagebox.showinfo("查询结果", "未查询到相关图书")
 
-    def borrow(self) -> None:
-        book_no = simpledialog.askstring("借书", "请输入要借阅的图书编号：", parent=self.window)
+    def borrow(self, book_no: str | None = None) -> None:
+        if book_no is None:
+            book_no = simpledialog.askstring("借书", "请输入要借阅的图书编号：", parent=self.window)
         if book_no is None:
             return
         ok, message = borrow_book(self.user["id"], book_no)
@@ -134,15 +208,15 @@ class UserWindow:
             messagebox.showwarning("借书失败", message)
         self.status_var.set(message)
 
-    def return_selected_book(self) -> None:
-        rows = get_user_current_borrows(self.user["id"])
-        self._show_table(BORROW_COLUMNS, rows)
-        if not rows:
-            messagebox.showinfo("还书", "当前没有未归还图书")
-            self.status_var.set("当前没有未归还图书")
-            return
-
-        record_id = simpledialog.askinteger("还书", "请输入要归还的借阅记录编号：", parent=self.window)
+    def return_selected_book(self, record_id: int | None = None) -> None:
+        if record_id is None:
+            rows = get_user_current_borrows(self.user["id"])
+            self._show_table(BORROW_COLUMNS, rows, "borrows")
+            if not rows:
+                messagebox.showinfo("还书", "当前没有未归还图书")
+                self.status_var.set("当前没有未归还图书")
+                return
+            record_id = simpledialog.askinteger("还书", "请输入要归还的借阅记录编号：", parent=self.window)
         if record_id is None:
             return
         ok, message = return_book(self.user["id"], record_id)
@@ -155,7 +229,7 @@ class UserWindow:
 
     def show_my_borrows(self) -> None:
         rows = get_user_current_borrows(self.user["id"])
-        self._show_table(BORROW_COLUMNS, rows)
+        self._show_table(BORROW_COLUMNS, rows, "borrows")
         self.status_var.set(f"当前未归还图书 {len(rows)} 本")
         if not rows:
             messagebox.showinfo("我的借阅", "当前没有未归还图书")

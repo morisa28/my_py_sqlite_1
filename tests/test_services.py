@@ -7,11 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from auth import login
+from auth import login, register_user
 from database import init_db
 from services.book_service import add_book, delete_book, get_all_books_overview, search_books, update_book
 from services.borrow_service import borrow_book, get_user_current_borrows, return_book
 from services.user_service import get_user_borrow_status
+from ui.table_utils import sort_rows
 
 
 class LibraryServiceTests(unittest.TestCase):
@@ -40,6 +41,23 @@ class LibraryServiceTests(unittest.TestCase):
         self.assertEqual(admin["role"], "admin")
         self.assertEqual(user["role"], "user")
         self.assertIsNone(login("user01", "wrong", self.db_path))
+
+    def test_register_user(self) -> None:
+        ok, message = register_user("reader01", "abc123", "abc123", "新读者", self.db_path)
+        self.assertTrue(ok, message)
+
+        user = login("reader01", "abc123", self.db_path)
+        self.assertIsNotNone(user)
+        self.assertEqual(user["role"], "user")
+        self.assertEqual(user["name"], "新读者")
+
+        ok, message = register_user("reader01", "abc123", "abc123", "重复读者", self.db_path)
+        self.assertFalse(ok)
+        self.assertIn("已存在", message)
+
+        ok, message = register_user("reader02", "abc123", "different", "读者02", self.db_path)
+        self.assertFalse(ok)
+        self.assertIn("不一致", message)
 
     def test_borrow_limit_and_return(self) -> None:
         user = login("user01", "123456", self.db_path)
@@ -95,6 +113,11 @@ class LibraryServiceTests(unittest.TestCase):
         overview = get_all_books_overview(self.db_path)
         self.assertEqual(len(overview), 20)
         self.assertGreaterEqual(len(search_books("Python", self.db_path)), 1)
+
+    def test_book_number_sort_uses_numeric_suffix(self) -> None:
+        rows = [{"book_no": "B010"}, {"book_no": "B002"}, {"book_no": "B001"}]
+        sorted_rows = sort_rows(rows, "book_no", descending=False)
+        self.assertEqual([row["book_no"] for row in sorted_rows], ["B001", "B002", "B010"])
 
 
 if __name__ == "__main__":
